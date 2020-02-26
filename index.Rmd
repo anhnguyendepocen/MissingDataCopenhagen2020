@@ -22,8 +22,8 @@ Course instructor: Jonathan Bartlett, [University of Bath](http://www.bath.ac.uk
 ## Datasets for practicals
 The following two dataset files are needed for the practicals:
 
-[nhanesMort.RData](Datasets/nhanesMort.RData)
-[practical1.RData](Datasets/practical1.RData)
+* [nhanesMort.RData](Datasets/nhanesMort.RData)
+* [practical1.RData](Datasets/practical1.RData)
 
 ## Practicals
 
