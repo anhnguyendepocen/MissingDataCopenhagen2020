@@ -26,13 +26,13 @@ The following zip file contains the datasets needed for the practicals.
 
 ## Practicals
 
-* [Practical 1](practical1stata.html)
-* [Practical 2](practical2stata.html)
-* [Practical 3](practical3stata.html)
-* [Practical 4](practical4stata.html)
+* [Practical 1](Practicals/practical1.html)
+* [Practical 2](Practicals/practical2.html)
+* [Practical 3](Practicals/practical3.html)
+* [Practical 4](Practicals/practical4.html)
 
 ## Practical solutions
-* [Solutions 1](solution1stata.html)
-* [Solutions 2](solution2stata.html)
-* [Solutions 3](solution3stata.html)
-* [Solutions 4](solution4stata.html)
+* [Solutions 1](Practicals/solution1.html)
+* [Solutions 2](Practicals/solution2.html)
+* [Solutions 3](Practicals/solution3.html)
+* [Solutions 4](Practicals/solution4.html)
