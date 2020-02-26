@@ -1,0 +1,145 @@
+---
+title: "Practical 3 solutions"
+author: "Jonathan Bartlett"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+bibliography: ../../../references.bib
+link-citations: true
+linkcolor: blue
+---
+
+
+# Introduction
+
+```{r, results='hide'}	
+load("../Datasets/nhanesMort.Rdata")
+nhanesMort$dead10 <- 1*((nhanesMort$dead==1) & (nhanesMort$tMonths<120)) 
+cca10year <- glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, data=nhanesMort, family="binomial")
+```
+
+# Missing data patterns
+
+```{r}
+library(mice)
+md.pattern(nhanesMort, rotate.names = TRUE)
+```
+
+**Given the information you get from `summary(nhanesMort)`, can you figure out what is being shown in the resulting plot?**
+
+Each row in the resulting plot corresponds to a particular pattern of missing values. Blue indicates observed and red indicates missing. The columns correspond to variables, which are ordered according to increasing levels of missingness. The rows correspond to the different patterns. The numbers down the left indicate the number of observations which have each pattern. The numbers on the right indicate the number of missing values in that particular pattern. The numbers at the bottom indicate the number of missing values in each column (variable).
+
+Thus we see that there are 3207 observations with no missing values. `ALQ150` contains the most missing values. As one would expect given the variables we are looking at and the way they have been collected, the pattern is not monotone.
+
+# Multiple imputation
+
+```{r}
+imps <- mice(nhanesMort, m=10, maxit=0)
+imps
+```
+
+
+```{r}
+myMethod <- c("", "", "", "norm", "norm", "norm", "norm", "norm", "logreg", "", "", "")
+```
+
+```{r}
+#this gets us the default predictorMatrix
+myPredictorMatrix <- imps$predictorMatrix
+#now we modify by setting columns to zero
+myPredictorMatrix[,c(10,11)] <- 0
+myPredictorMatrix
+```
+
+```{r, results='hide'}
+set.seed(52267)
+imps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+```{r, warning=FALSE}
+fit <- with(data = imps, exp = glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, family="binomial"))
+pooled <- pool(fit)
+summary(pooled, conf.int = TRUE)
+```
+
+```{r}
+cbind(coef(cca10year), summary(pooled)[,1])
+```
+
+**How do the two sets of estimates compare? What assumptions are required for the two sets of results to be valid?**
+
+The estimates are broadly quite close to each other. There are some differences though. The intercept has changed non trivially, as has the coefficient for being female.
+
+As discussed in the previous practical, the CCA analysis is valid under a variety of different possible conditions. In the end we found it plausible that the CCA was valid as the probability of being a complete case was plausibly independent of the outcome conditional on the covariates. This assumption allows for the possibility that missingness in `ALQ150` depends on the Yes/No answer to `ALQ150` (i.e. MNAR), and it is quite plausible that this is the case. In particular one could imagine that people who are or have been heavy drinkers may be less willing to respond to the `ALQ150` question.
+
+The MI analysis is valid assuming the data are MAR and the imputation models are correctly specified. Here where we have a complex missingness pattern, MAR is difficult to understand (there is a technical definition for it still though). Roughly speaking though, if missingness in `ALQ150` is dependent on `ALQ150`, conditional on the other variables we have used, MAR is violated, and so the MI estimates may be biased.
+
+**How do the CCA and MI standard errors compare? Are they as you expect?**
+
+```{r}
+cbind(diag(vcov(cca10year))^0.5, summary(pooled)[,2])
+```
+
+The MI standard errors are all smaller than the CCA standard errors. This is what we should expect. We have gained information by using MI. The information we have gained is that from the the observed values in the incomplete cases who are omitted in the CCA. Because of this, we tend to gain the most information for coefficicients of the fully observed variables, whereas coefficients for variables with the largest amounts of missing data are reduced less (at least in the absence of strong auxiliary variables).
+
+# Convergence and model checking
+
+```{r, results='hide'}
+set.seed(52267)
+convImps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix, maxit=50)
+```
+
+```{r}
+plot(convImps)
+```
+
+
+```{r, warning=FALSE}
+densityplot(imps)
+```
+
+**Do you see any large differences between the distributions of the observed and imputed values?**
+
+There appear to be some differences between the observed and imputed distributions for `sbp` and `hdl`. In particular, it looks like the `hdl` distribution is somewhat right skewed, which the normal imputation model cannot accommodate. One possible route to accommodating this would be to switch back to `mice`'s default method of predictive mean matching for numeric variables.
+
+# Monte-Carlo error
+
+**Do you need to increase the number of imputations to reduce Monte-Carlo error to an acceptable level, and if so, how many would you use? Re-impute using this new number of imputations, and compare your results to the ones obtained previously.**
+
+The proportion of incomplete cases is:
+```{r}
+(dim(nhanesMort)[1]-sum(complete.cases(nhanesMort)))/dim(nhanesMort)[1]
+```
+suggesting we should use at least 28 imputations. Since the dataset here is not too large, we will impute using 50 imputations and compare the results:
+```{r, results='hide'}
+set.seed(1290)
+imps2 <- mice(nhanesMort, m=50, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+```{r, warning=FALSE}
+fit2 <- with(data = imps2, exp = glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, family="binomial"))
+pooled2 <- pool(fit2)
+cbind(coef(cca10year), summary(pooled)[,1], summary(pooled2)[,1])
+```
+
+As we can see, there are non-trivial differences between the imputation estimates from the first and second runs. If we were to run a further set of 50 with a different seed, the differences with the estimates just obtained ought to be much smaller.
+
+# Omitting the outcome
+
+**What impact does omitting the substantive model outcome variable from the imputation process have on estimates?**
+
+```{r, warning=FALSE}
+myPredictorMatrix[,12] <- 0
+myPredictorMatrix
+set.seed(1290)
+imps3 <- mice(nhanesMort, m=50, method=myMethod, predictorMatrix=myPredictorMatrix, printFlag = FALSE)
+fit3 <- with(data = imps3, exp = glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, family="binomial"))
+pooled3 <- pool(fit3)
+cbind(coef(cca10year), summary(pooled2)[,1], summary(pooled3)[,1])
+```
+
+Compared to the estimates from the preceding MI run, we see that the coefficients corresponding to the partially observed variables have all been diluted towards the null. This is because in this imputation run we have imputed these covariates assuming they have no association with the outcome variable `dead10`, conditional on the other covariates. This illustrates the importance of conditioning on the substantive model outcome variable(s) when imputing missing substantive model covariates  [@bartlett2011multiple].
+
+# References

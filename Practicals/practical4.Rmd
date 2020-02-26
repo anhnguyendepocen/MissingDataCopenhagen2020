@@ -1,0 +1,188 @@
+---
+title: "Practical 4"
+author: "Jonathan Bartlett"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+bibliography: ../../../references.bib
+link-citations: true
+linkcolor: blue
+---
+
+
+# Introduction
+In this practical we will continue analysing the NHANES 1999-2000 data, and will explore how to handle interactions in the substantive (outcome) model and survival substantive models.
+
+# Substantive model interactions
+We will explore how to handle interactions in the substantive (outcome) model by way of a new illustrative substantive model. First, re-load the data:
+
+```{r, results='hide', eval=FALSE}	
+load("../Datasets/nhanesMort.Rdata")
+```
+
+Next we will fit our new substantive model: a linear regression for systolic blood pressure with the other variables measured at the 1999-2000 survey as covariates. We also include an interaction between `waist_circum` and `ALQ150`:
+
+```{r, eval=FALSE}
+ccasbp <- lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150, data=nhanesMort)
+summary(ccasbp)
+```
+
+**Given we now have the interaction term `waist_circum:ALQ150Yes`, how should the coefficients for `waist_circum`, `ALQ150Yes` and `waist_circum:ALQ150Yes` be interpreted?**
+
+## Impute then transform
+
+We will now impute the missing values in the variables, looking at different approaches to handling the interaction term. The first approach, 'impute then transform', ignores the issue of interactions at the imputation stage, and then simply creates the interaction terms in the imputed datasets (this it the transform bit in 'impute then transform').
+
+First we will create our `method` argument, but this time we will make use of a helper function `make.method`:
+```{r, eval=FALSE}
+library(mice)
+#use make.method to obtain the default method vector
+myMethod <- make.method(nhanesMort)
+myMethod
+#change the default pmm for numerics to norm
+myMethod[myMethod=="pmm"] <- "norm"
+```
+
+Next we will create our predictor matrix. We will instruct `mice` not to use the follow-up mortality variables `dead` and `tMonths` in the imputation process, although one could include them as auxiliary variables if desired.
+
+```{r, eval=FALSE}
+#this gets us the default predictorMatrix
+myPredictorMatrix <- make.predictorMatrix(nhanesMort)
+#now we modify to stop dead and tMonths from being used
+myPredictorMatrix[,"dead"] <- 0
+myPredictorMatrix[,"tMonths"] <- 0
+```
+
+Now we can impute:
+
+```{r, eval=FALSE}
+set.seed(52267)
+imps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+**Now fit the substantive model, including the interaction term, to the imputed datasets, and compare the estimates to the earlier complete case estimates. In particular, how much has the coefficient for the interaction term changed?**
+
+```{r, warning=FALSE, eval=FALSE, echo=FALSE}
+fit <- with(data = imps, exp = lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+pooled <- pool(fit)
+cbind(coef(ccasbp), summary(pooled)[,1])
+```
+
+## Passive imputation
+
+Next we will try an alternative approach called 'passive imputation'. In this approach we will create the interaction variable in the data frame and then impute including this variable. For the interaction variable, we will instruct `mice` that its value is determined by multiplying `waist_circum` and `ALQ150`. Thus each time misisng values in `waist_circum` and `ALQ150` are imputed, the derived interaction variable's values will be updated.
+
+Run the following code to create the interaction variable, create the `method` and `predictorMatrix` arguments, and then impute:
+
+```{r, eval=FALSE}
+#create a copy of the data frame nhanes2
+nhanesMort2 <- nhanesMort
+#change ALQ150 from a factor to a numeric 0/1
+nhanesMort2$ALQ150 <- as.numeric(nhanesMort2$ALQ150)-1
+#create interaction variable
+nhanesMort2$waistALQ150 <- nhanesMort2$waist_circum*nhanesMort2$ALQ150
+
+myMethod <- make.method(nhanesMort2)
+#change the default pmm for numerics to norm
+myMethod[myMethod=="pmm"] <- "norm"
+#specify how interaction is to be imputed
+myMethod["waistALQ150"] <- "~I(waist_circum*ALQ150)"
+
+myPredictorMatrix <- make.predictorMatrix(nhanesMort2)
+#now we modify to stop dead and tMonths from being used
+myPredictorMatrix[,"dead"] <- 0
+myPredictorMatrix[,"tMonths"] <- 0
+#now specify that waistALQ150 is to be imputed using waist and ALQ150
+myPredictorMatrix["waistALQ150",] <- 0
+myPredictorMatrix["waistALQ150",c("waist_circum", "ALQ150")] <- 1
+#now specify that waistALQ150 is not used when imputing waist_circum or ALQ150
+myPredictorMatrix[c("waist_circum", "ALQ150"),"waistALQ150"] <- 0
+
+set.seed(52267)
+imps <- mice(nhanesMort2, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+**Fit the substantive model to the imputed datasets and compare the results with those obtained earlier. Check what modelling assumptions have been made by the imputation process and consider how this may impact on the validity of the final estimates.**
+
+```{r, warning=FALSE, eval=FALSE, echo=FALSE}
+fit <- with(data = imps, exp = lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+pooled2 <- pool(fit)
+cbind(coef(ccasbp), summary(pooled)[,1], summary(pooled2)[,1])
+```
+
+
+## SMCFCS
+
+The last approach we will use is the substantive model compatible method. First make sure you have the package installed and loaded:
+
+```{r, eval=FALSE}
+#install.packages("smcfcs", "mitools")
+library(smcfcs)
+```
+
+Next we can impute the missing values using `smcfcs`. We have to tell the function what our chosen substantive model is (including the interaction) and what univariate methods to use for each partially observed covariate. Note we impute the original `nhanesMort` data frame, as `smcfcs` doesn't require us to have the interaction term as a variable in the data frame:
+
+```{r, eval=FALSE}
+set.seed(698166)
+imps <- smcfcs(nhanesMort, smtype="lm",
+               smformula="sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150",
+               method=c("", "", "", "", "norm", "norm", "norm", "norm", "logreg", "", "")) 
+```
+
+Look at the output from `smcfcs` and check you understand what modelling assumptions it is making when imputing.
+
+To analyse the imputed datasets we will make use of the `mitools` package:
+
+```{r, eval=FALSE}
+library(mitools)
+impobj <- imputationList(imps$impDatasets)
+models <- with(impobj, lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+summary(MIcombine(models))
+```
+
+**Compare the estimates to those obtained earlier, in particular those involving `waist_circum` and `ALQ150`.**
+
+```{r, eval=FALSE}
+estTable <- cbind(coef(ccasbp), summary(pooled)[,1], summary(pooled2)[,1], MIcombine(models)$coefficients)
+colnames(estTable) <- c("CCA", "Impute then transform", "Passive imputation", "SMCFCS")
+estTable
+```
+
+For further discussion of approaches to handling so called derived variables, see Section 6.4 of [van Buuren's MI book](https://stefvanbuuren.name/fimd/sec-knowledge.html). 
+
+# Cox proportional hazards substantive model
+
+In the final part of the practical we will illustrate `smcfcs` capability for imputing missing covariates when the substantive model is a Cox proportional hazards model. We will fit a model for all-cause mortality with the 1999-2000 survey variables as covariates:
+
+```{r, eval=FALSE}
+library(survival)
+ccacox <- coxph(Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, data=nhanesMort)
+summary(ccacox)
+```
+
+Next we impute the missing covariates values using `smcfcs`, specifying our new substantive model as the Cox model just fitted:
+
+```{r, eval=FALSE}
+imps <- smcfcs(nhanesMort, smtype="coxph",
+               smformula="Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150",
+               method=c("", "", "", "norm", "norm", "norm", "norm", "norm", "logreg", "", ""))
+```
+
+Lastly, we fit the Cox model to the imputed datasets, pool the results, and compare to the CCA results:
+
+```{r, eval=FALSE}
+impobj <- imputationList(imps$impDatasets)
+models <- with(impobj, coxph(Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150))
+
+#compare estimates
+cbind(coef(ccacox), MIcombine(models)$coefficients)
+#compare standard errors
+cbind(diag(vcov(ccacox))^0.5, diag(MIcombine(models)$variance)^0.5)
+```
+
+**How do the estimates and standard errors compare between CCA and after imputation using `smcfcs`?**
+
+
+# References

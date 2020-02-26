@@ -1,0 +1,168 @@
+---
+title: "Practical 4 solutions"
+author: "Jonathan Bartlett"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+bibliography: ../../../references.bib
+link-citations: true
+linkcolor: blue
+---
+
+
+# Introduction
+
+
+# Substantive model interactions
+
+```{r}	
+load("../Datasets/nhanesMort.Rdata")
+```
+
+```{r}
+ccasbp <- lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150, data=nhanesMort)
+summary(ccasbp)
+```
+
+**Given we now have the interaction term `waist_circum:ALQ150Yes`, how should the coefficients for `waist_circum`, `ALQ150Yes` and `waist_circum:ALQ150Yes` be interpreted?**
+
+The coefficient of `waist_circum` now represents the average increase in `sbp` for a 1 unit increase in `waist_circum` for someone with `ALQ150` equal to No. The coefficient of `ALQ150Yes` now corresponds to the estimated average increase in `sbp` for Yes vs. No for `ALQ150` for someone with a `waist_circum` of zero. Since no one has a zero waist circumference, this is not a very useful value. If we wanted to present these results we would either calculate the appropriate linear transformation of the coefficients to obtain an estimate of the effect of `ALQ150` for a suitable value of `waist_circum`, or alternatively we could centre `waist_circum` at some sensible value before performing any analyses. The interaction term `waist_circum:ALQ150Yes` represents the additional effect of 1 unit increases in `waist_circum` for those with `ALQ150` equal to Yes.
+
+## Impute then transform
+
+```{r}
+library(mice)
+#use make.method to obtain the default method vector
+myMethod <- make.method(nhanesMort)
+myMethod
+#change the default pmm for numerics to norm
+myMethod[myMethod=="pmm"] <- "norm"
+```
+
+```{r}
+#this gets us the default predictorMatrix
+myPredictorMatrix <- make.predictorMatrix(nhanesMort)
+#now we modify to stop dead and tMonths from being used
+myPredictorMatrix[,"dead"] <- 0
+myPredictorMatrix[,"tMonths"] <- 0
+```
+
+```{r}
+set.seed(52267)
+imps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+**Now fit the substantive model, including the interaction term, to the imputed datasets, and compare the estimates to the earlier complete case estimates. In particular, how much has the coefficient for the interaction term changed?**
+
+```{r, warning=FALSE}
+fit <- with(data = imps, exp = lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+pooled <- pool(fit)
+cbind(coef(ccasbp), summary(pooled)[,1])
+```
+
+There are some noticeable differences between the estimates. The interaction coefficient is somewhat smaller than in the complete case analysis, and the coefficients for the main effects of `waist_circum` and `ALQ150Yes` are also somewhat smaller. These changes are likely due to the way we have imputed the missing data - the interaction has been completely ignored in the imputation process. Thus missing `sbp` values have been imputed from a linear model assuming no interaction between `waist_circum` and `ALQ150`. Moreover, missing values in `waist_circum` and `ALQ150` have been imputed assuming no interaction between `sbp` and `ALQ150` and between `sbp` and `waist_circum`, which are implied by the presence of the `waist_circum*ALQ150` interaction in our substantive model for `sbp`.
+
+This approach to handling interactions (and more generally derived variables) in the substantive model is not really very good.
+
+## Passive imputation
+
+```{r}
+#create a copy of the data frame nhanes2
+nhanesMort2 <- nhanesMort
+#change ALQ150 from a factor to a numeric 0/1
+nhanesMort2$ALQ150 <- as.numeric(nhanesMort2$ALQ150)-1
+#create interaction variable
+nhanesMort2$waistALQ150 <- nhanesMort2$waist_circum*nhanesMort2$ALQ150
+
+myMethod <- make.method(nhanesMort2)
+#change the default pmm for numerics to norm
+myMethod[myMethod=="pmm"] <- "norm"
+#specify how interaction is to be imputed
+myMethod["waistALQ150"] <- "~I(waist_circum*ALQ150)"
+
+myPredictorMatrix <- make.predictorMatrix(nhanesMort2)
+#now we modify to stop dead and tMonths from being used
+myPredictorMatrix[,"dead"] <- 0
+myPredictorMatrix[,"tMonths"] <- 0
+#now specify that waistALQ150 is to be imputed using waist and ALQ150
+myPredictorMatrix["waistALQ150",] <- 0
+myPredictorMatrix["waistALQ150",c("waist_circum", "ALQ150")] <- 1
+#now specify that waistALQ150 is not used when imputing waist_circum or ALQ150
+myPredictorMatrix[c("waist_circum", "ALQ150"),"waistALQ150"] <- 0
+
+set.seed(52267)
+imps <- mice(nhanesMort2, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+**Fit the substantive model to the imputed datasets and compare the results with those obtained earlier. Check what modelling assumptions have been made by the imputation process and consider how this may impact on the validity of the final estimates.**
+
+```{r, warning=FALSE}
+fit <- with(data = imps, exp = lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+pooled2 <- pool(fit)
+cbind(coef(ccasbp), summary(pooled)[,1], summary(pooled2)[,1])
+```
+
+We are now imputing missing values in `sbp` from the same model as our substantive model, including the `waist_circum*ALQ150` interaction, which is a good thing. But when imputing `waist_circum` and (more importantly given how many missing values there are) `ALQ150`, we are not allowing for interactions between the outcome `sbp` and `ALQ150` and `waist_circum` respectively. We could add additional interaction terms to the data frame, and try and do this, but this approach rapidly gets pretty complicated. Moreover, it is not readily appararent that if we do this our imputation models are definitely compatible/congenial with our substantive model.
+
+## SMCFCS
+
+```{r}
+#install.packages("smcfcs", "mitools")
+library(smcfcs)
+```
+
+```{r}
+set.seed(698166)
+imps <- smcfcs(nhanesMort, smtype="lm",
+               smformula="sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150",
+               method=c("", "", "", "", "norm", "norm", "norm", "norm", "logreg", "", "")) 
+```
+
+```{r}
+library(mitools)
+impobj <- imputationList(imps$impDatasets)
+models <- with(impobj, lm(sbp~gender+age+ethnicity+waist_circum+weight+total_chol+hdl+ALQ150+waist_circum*ALQ150))
+summary(MIcombine(models))
+```
+
+**Compare the estimates to those obtained earlier, in particular those involving `waist_circum` and `ALQ150`.**
+
+```{r}
+estTable <- cbind(coef(ccasbp), summary(pooled)[,1], summary(pooled2)[,1], MIcombine(models)$coefficients)
+colnames(estTable) <- c("CCA", "Impute then transform", "Passive imputation", "SMCFCS")
+estTable
+```
+
+Focusing on the terms involving `waist_circum` and `ALQ150`: the coefficient for `waist_circum` from SMCFCS is similar to that from the passive imputation approach. The coefficient for `ALQ150` is closer to the CCA estimate than the impute then transform and passive imputation estimates. The coefficient for the interaction is also closer to the CCA estimate than the two other imputation estimates. This is consistent with SMCFCS properly allowing for an interaction between `waist_circum` and `ALQ150` in the imputation models for `sbp`, `waist_circum` and `ALQ150`.
+
+# Cox proportional hazards substantive model
+
+```{r}
+library(survival)
+ccacox <- coxph(Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, data=nhanesMort)
+summary(ccacox)
+```
+
+```{r}
+imps <- smcfcs(nhanesMort, smtype="coxph",
+               smformula="Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150",
+               method=c("", "", "", "norm", "norm", "norm", "norm", "norm", "logreg", "", ""))
+```
+
+```{r}
+impobj <- imputationList(imps$impDatasets)
+models <- with(impobj, coxph(Surv(tMonths,dead)~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150))
+
+#compare estimates
+cbind(coef(ccacox), MIcombine(models)$coefficients)
+#compare standard errors
+cbind(diag(vcov(ccacox))^0.5, diag(MIcombine(models)$variance)^0.5)
+```
+
+**How do the estimates and standard errors compare between CCA and after imputation using `smcfcs`?**
+
+With a few exceptions, the changes in coefficients are mostly small. For the standard errors, we see as we would expect reductions in standard errors for those covariates which are fully observed or mostly fully observed. In contrast, the standard error for `ALQ150` is actually a little bit larger than from CCA.
+
+# References

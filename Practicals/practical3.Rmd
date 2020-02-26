@@ -1,0 +1,135 @@
+---
+title: "Practical 3"
+author: "Jonathan Bartlett"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+bibliography: ../../../references.bib
+link-citations: true
+linkcolor: blue
+---
+
+# Introduction
+In this practical we will continue analysing the NHANES 1999-2000 data from the previous practical. By the end you should know how to describe the missing value patterns in a dataset and understand the key practical aspects of performing multiple imputation using chained equations with `mice`.
+
+We will focus on the regression analysis for mortality that was considered at the end of the previous practical. Load the data, generate the 10 year binary mortality indicator, and fit the substantive model of interest using complete case analysis:
+```{r, results='hide'}	
+load("../Datasets/nhanesMort.Rdata")
+nhanesMort$dead10 <- 1*((nhanesMort$dead==1) & (nhanesMort$tMonths<120)) 
+cca10year <- glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, data=nhanesMort, family="binomial")
+```
+
+# Missing data patterns
+An important first step in most data analyses is summarising the data and performing basic exploratory analyses. When missing data is a problem, it is important to find out about how much and where the missing data is. The `summary` function indicates the number of missing values per variable. It is also usually of interest to examine the missing data 'patterns' - i.e. which variables tend to be missing at the same. This can be achieved using the `mice` package's `md.pattern` function:
+
+```{r, eval=FALSE}
+library(mice)
+md.pattern(nhanesMort, rotate.names = TRUE)
+```
+
+**Given the information you get from `summary(nhanesMort)`, can you figure out what is being shown in the resulting plot?**
+
+# Multiple imputation
+We will now perfor MI on the dataset, imputing the missing values in all of the variables with missing values. To see what `mice` will do if we pass it the `nhanesMort` dataframe, we call it with `maxit=0`. By doing this, `mice` will process the call, but will not actually perform any iterations no produce any imputations:
+
+```{r, eval=FALSE}
+imps <- mice(nhanesMort, m=10, maxit=0)
+imps
+```
+
+The output shows us what imputation methods `mice` would have used to impute each variable. Complete variables have `""` for this. `mice` has a large range of methods that can be used to impute a single variable. If we don't tell it otherwise, it has default methods depending on the type of the variable. `logreg` stands for logistic regression, and it plans to use this to impute the binary variable `ALQ150`, which is fine. For the other continuous/numeric variables, `mice` is going to use `pmm`. This stands for predictive mean matching, and is an adaptation of normal linear regression where for each value to be imputed, closest 'donors' are found using the predicted mean from the linear model. The imputed value is then taken randomly from the observed values among the donor pool. We will instead ask `mice` to use method `norm` for the continuous variables, which corresponds to normal linear regression. We will therefore specify a value to `mice`'s `method` argument:
+```{r, eval=FALSE}
+myMethod <- c("", "", "", "norm", "norm", "norm", "norm", "norm", "logreg", "", "", "")
+```
+
+The predictor matrix shows us what variables will be used to impute each partially observed variable. So for example, the bottom row labelled `weight` indicates which of the other variables will be used to impute `weight`. `mice`'s default is to use every other variable to impute. We notice that we have `dead`, `tMonths` and `dead10`, where the latter is derived from the first two. Since our substantive analysis just uses the variable `dead10`, we will just use this variable, and instruct `mice` not to use `dead` and `tMonths` as covariates in any of the imputation models. To do this we will define a custom `predictorMatrix`:
+
+```{r, eval=FALSE}
+#this gets us the default predictorMatrix
+myPredictorMatrix <- imps$predictorMatrix
+#now we modify by setting columns to zero
+myPredictorMatrix[,c("dead","tMonths")] <- 0
+myPredictorMatrix
+```
+
+We can now proceed to imputation, being careful to pass `myMethod` and `myPredictorMatrix` to the `mice` function:
+
+```{r, results='hide', eval=FALSE}
+set.seed(52267)
+imps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix)
+```
+
+We can then fit our substantive model to the imputations and pool the results:
+
+```{r, results='hide', warning=FALSE, eval=FALSE}
+fit <- with(data = imps, exp = glm(dead10~gender+age+ethnicity+sbp+waist_circum+weight+total_chol+hdl+ALQ150, family="binomial"))
+pooled <- pool(fit)
+summary(pooled, conf.int = TRUE)
+```
+
+We now compare the point estimates of the log odds ratio between the complete case analysis and the MI analysis:
+
+```{r, eval=FALSE}
+cbind(coef(cca10year), summary(pooled)[,1])
+```
+
+**How do the two sets of estimates compare? What assumptions are required for the two sets of results to be valid?**
+
+Next we will compare the standard errors:
+
+```{r, eval=FALSE}
+cbind(diag(vcov(cca10year))^0.5, summary(pooled)[,2])
+```
+
+**How do the CCA and MI standard errors compare? Are they as you expect?**
+
+
+# Convergence and model checking
+
+There are a number of ways of checking various aspects of the imputation process, some of which we will now explore. The first is the number of cycles or iterations used, as specified by the `maxit` argument to `mice`. We did not specify the number of iterations when we imputed. `mice`'s default is 5, and this isn't really sufficient to actually assess whether 5 is sufficient. We thus re-run the imputation process with a larger number of iterations to assess convergence:
+
+```{r, results='hide', eval=FALSE}
+set.seed(52267)
+convImps <- mice(nhanesMort, m=10, method=myMethod, predictorMatrix=myPredictorMatrix, maxit=50)
+```
+
+```{r, eval=FALSE}
+plot(convImps)
+```
+
+The plots show the means and SDs of the variables that are being imputed by iteration. The plots are consistent with the algorithm converging quickly to its so called stationary distribution, since the different imputation runs' plots are lying on top of each other and are varying randomly. Signs of non-convergence would be large differences between the imputations (chains), or non random walk like behaviour, e.g. the mean steadily increasing with more iterations. When non-convergence is suspected, we would need to re-run the imputation process with more iterations and re-check the plot. Here the default of 5 iterations looks fine.
+
+A further useful check is to examine the distribution of imputed values and compare it to the distribution of the observed values. Unless data are MCAR, these distributions are expected to be different. However, examining the distributions often reveals differences which are probably not simply due to non MCAR missingness, e.g. the observed values have a very skewed distribution and are imputed values are more normally distributed by virtue of the fact we have used a normal imputation model. To examine the distributions, we can use:
+
+```{r, warning=FALSE, eval=FALSE}
+densityplot(imps)
+```
+
+This displays kernel density plots of each (continuous) variable, separately for the imputed and observed values. The blue lines show the observed data while the red lines are for the imputed values (different lines for each imputation).
+
+**Do you see any large differences between the distributions of the observed and imputed values?**
+
+
+# Monte-Carlo error
+MI inferences are subject to Monte-Carlo or simulation error, because the imputations are to some extent random. This means that if you change the random number seed and re-run the imputation process, all your estimates, p-values and confidence intervals will change somewhat. These differences can be made arbitrarily small by increasing the number of imputations. How small does the Monte-Carlo need to be? We should ensure they are small enough so that a new run with a different seed would give results which materially are the same.
+
+[@White2011] (and others) have explored various approaches to choosing the number of imputations to ensure that estimates, p-values and test statistics have relatively small Monte-Carlo error. In the end they recommend the number of imputations should be at least equal to the percentage of incomplete cases.
+
+**Do you need to increase the number of imputations to reduce Monte-Carlo error to an acceptable level, and if so, how many would you use? Re-impute using this new number of imputations, and compare your results to the ones obtained previously.**
+
+# Omitting the outcome
+
+If time permits, try re-running the imputation for the missing covariates but instruct `mice` to not use the substantive model outcome variable `dead10`.
+
+**What impact does omitting the substantive model outcome variable from the imputation process have on estimates?**
+
+
+# Conclusions
+
+We have seen that MI using chained equations is a flexible and easy to use approach to handling missing data. Care is needed however in a number of the specific details of its implementation, including choice of variables to include, choice of imputation method and checking if these are reasonable for the data, convergence checking, and Monte-Carlo error. In the next practical we will explore further issues which arise, specifically when there are important conflicts between assumptions made by the imputation and substantive models.
+
+The analyses have also hopefully highlighted that it is not the case that estimates are MI are always less biased than those from CCA. Which is plausibly unbiased (if either) depends on what one believes about the missingness mechanisms and crucially on what the substantive model consists of. For further reading on this topic, see [@White2010a;@hughes2019accounting].
+
+# References

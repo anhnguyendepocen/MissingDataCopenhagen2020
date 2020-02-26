@@ -1,0 +1,86 @@
+---
+title: "Solutions to practical 1"
+author: "Jonathan Bartlett"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Dataset 1
+
+```{r}	
+load("../Datasets/practical1.RData")
+dim(data1)
+summary(data1)
+```
+We see that the `sbpmiss` contains `r sum(is.na(data1$sbpmiss))` missing values. The data frame has 1000 rows, so we have around 50\% missingness in this variable. The other two variables are fully observed.
+
+```{r}
+plot(data1$age, data1$sbpmiss)
+```
+
+The plot shows that, at least among the subset of the dataset where SBP was observed, there is a positive association between age and SBP. This is of course consistent with established evidence about age and blood pressure.
+
+```{r}	
+data1$r <- 1-is.na(data1$sbpmiss)
+```
+
+```{r}	
+summary(glm(r ~ age, family=binomial, data1))
+```
+
+The logistic regression shows there is no evidence of an association between missingness in `sbpmiss` and `age`. The data are thus consistent with MCAR.
+	
+```{r}	
+summary(glm(r ~ age+sbpmiss, family=binomial, data1))
+```
+	
+R reports that the model did not converge. We also see a warning that `r sum(is.na(data1$sbpmiss))` observations were deleted (omitted) due to missingness. R's default behaviour is to try and fit the model using the complete cases, i.e. when `sbpmiss` is not missing. However, within this subset, `r` is always 1. Consequently, the logistic regression model cannot be fitted. This is because, as intuition suggests, one cannot explore how missingness in `sbpmiss` depends on the value of `sbpmiss`. Thus we cannot check if the data are MAR or MNAR, although our previous analysis showed that the observed data are consistent with MCAR.
+	
+```{r}	
+summary(glm(r ~ age+sbpcomplete, family=binomial, data1))
+```
+	
+We can now see that missingness in `sbpmiss` appears independent of both `age` and SBP, but only by cheating and using the fully observed `sbpcomplete`. In reality we would of course not have this variable.
+	
+# Dataset 2 
+```{r}	
+data2$r <- 1-is.na(data2$sbpmiss)
+summary(glm(r ~ age, family=binomial, data2))
+```
+Repeating the logistic analyses with the second dataset, we find that missingness in `sbpmiss` is associated with `age`. In particular, as age increases, the log odds of SBP being observed decreases. This means we have evidence against the MCAR assumption. Thus the missingness could be MAR or MNAR.
+
+```{r}
+summary(glm(r ~ age+sbpcomplete, family=binomial, data2))
+```
+Adding `sbpcomplete` to the logistic regression model, we see that there is borderline significant evidence that missingness is associated with `sbpcomplete`, conditional on `age`. Thus we have borderline significant evidence to reject MAR in favour of MNAR. Here we cannot be that definitive about the true (population) mechanism type. In any case, note however that we are only able to draw these conclusions by cheating and using the fully observed `sbpcomplete` variable.
+
+```{r}	
+summary(glm(r ~ sbpcomplete, family=binomial, data2))
+```
+
+From this analysis we see that missingness in `sbpmiss` is associated with the SBP values. At first sight this might be interpreted as indicating that the data are not MAR, contradicting our preceding conclusion. This is however incorrect. MAR says that missingness is **conditionally** independent of the partially observed variable, conditional on the fully observed variable(s).
+	
+# Dataset 3
+```{r}	
+data3$r <- 1-is.na(data3$sbpmiss)
+summary(glm(r ~ age, family=binomial, data3))
+summary(glm(r ~ age+sbpcomplete, family=binomial, data3))
+```
+
+Again from the first logistic regression we find evidence to reject MCAR. It is only by cheating again (by using `sbpcomplete`) that we are able to determine that now the missing values in `sbpmiss` are MNAR. In fact, from this analysis it appears that missingness is independent of `age` conditional on `sbpcomplete`. This is still MNAR.
+
+# Dataset 4
+```{r}	
+data4$r <- 1-is.na(data4$sbpmiss)
+summary(glm(r ~ age, family=binomial, data4))
+summary(glm(r ~ age+sbpcomplete, family=binomial, data4))
+```
+
+For the fourth dataset, missingness in `sbpmiss` appears independent from `age`. The data are thus consistent with an MCAR mechanism. However, upon adding `sbpcomplete` to the logistic regression, we see that missingness is in fact MNAR. To help understand this, following the hint we re-plot age against the complete SBP variable:
+```{r}
+plot(data4$age, data4$sbpcomplete)
+```
+
+The plot shows (we could check this with a linear regression) that age is independent of SBP. Thus although missingness in SBP depended on SBP, since age and SBP were generated (in `data4`) as being independent, there is no association between missingness in SBP and age. The example makes clear that even when data appear MCAR, it is possible (although arguably unlikely) that in fact they are MNAR.
