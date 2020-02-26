@@ -20,9 +20,10 @@ Course instructor: Jonathan Bartlett, [University of Bath](http://www.bath.ac.uk
 * [Lecture 4](Lectures/Lecture4.pdf)
 
 ## Datasets for practicals
-The following zip file contains the datasets needed for the practicals.
+The following two dataset files are needed for the practicals:
 
-[Datasets](datasets.zip)
+[nhanesMort.RData](Datasets/nhanesMort.RData)
+[practical1.RData](Datasets/practical1.RData)
 
 ## Practicals
 
