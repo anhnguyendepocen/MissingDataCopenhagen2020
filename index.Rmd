@@ -27,6 +27,11 @@ The following two dataset files are needed for the practicals:
 
 ## Practicals
 
+To do the practicals, the following R packages should be installed:
+```{r, eval=FALSE}
+install.packages(c("mice", "smcfcs", "mitools"))
+```
+
 * [Practical 1](Practicals/practical1.html)
 * [Practical 2](Practicals/practical2.html)
 * [Practical 3](Practicals/practical3.html)
