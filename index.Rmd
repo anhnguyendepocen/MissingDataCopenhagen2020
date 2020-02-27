@@ -37,3 +37,9 @@ The following two dataset files are needed for the practicals:
 * [Solutions 2](Practicals/solution2.html)
 * [Solutions 3](Practicals/solution3.html)
 * [Solutions 4](Practicals/solution4.html)
+
+## License
+
+These course materials are licensed under the Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) license.
+
+[![License: CC BY-NC-SA 4.0](https://licensebuttons.net/l/by-nc-sa/4.0/80x15.png)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
